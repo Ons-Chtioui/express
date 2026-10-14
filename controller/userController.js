@@ -1,70 +1,102 @@
+const User = require('../models/userModel');
+const Article = require('../models/articleModel');
 
-const { estNonVide, estEmailValide } = require('../utils/validators');
-const users=[
-    {id:1,name:"onschtioui",email:"chtiouions1@gmail.com",role:"admin"},
-    {id:2,name:"ons",email:"ons@gmail.com",role:"user"}]
-let prochainId = 3;
-// 1. Récupérer tous les utilisateurs (avec filtre optionnel ?role=...)
-const getAllUsers = (req, res) => {
-  const { role } = req.query;
-  let resultat = users;
-  if (role) {
-    resultat = users.filter(u => u.role === role);
+// Obtenir tous les utilisateurs
+const getAllUsers = async (req, res) => {
+  try {
+    const { role } = req.query;
+    const filter = role ? { role } : {};
+    const users = await User.find(filter);
+    res.status(200).json({ total: users.length, users });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
-  res.status(200).json({ total: resultat.length, users: resultat });
 };
 
-// 2. Récupérer un utilisateur par son ID
-const getUserById = (req, res) => {
-  const id = Number(req.params.id);
-  const user = users.find(u => u.id === id);
-  if (!user) {
-    return res.status(404).json({ error: `Utilisateur ${id} introuvable` });
+// Obtenir un utilisateur par son ID
+const getUserById = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+    res.status(200).json(user);
+  } catch (err) {
+    if (err.name === 'CastError') {
+      return res.status(400).json({
+        message: 'Identifiant de ressource invalide (format ObjectId attendu)'
+      });
+    }
+    res.status(500).json({ message: err.message });
   }
-  res.status(200).json(user);
 };
 
-
-
-const createUser = (req, res) => {
-  const { name, email, role } = req.body;
-
-  // 1. Validation du nom
-  if (!estNonVide(name)) {
-    return res.status(400).json({ error: "Le nom est obligatoire et ne doit pas être vide" });
+// Créer un utilisateur
+const createUser = async (req, res) => {
+  try {
+    const { name, email, age, role, bio, phone } = req.body;
+    const user = await User.create({ name, email, age, role, bio, phone });
+    res.status(201).json({ message: 'Utilisateur créé avec succès', user });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
   }
-
-  // 2. Validation de l'email
-  if (!estEmailValide(email)) {
-    return res.status(400).json({ error: "L'adresse email est invalide (doit contenir '@' et '.')" });
-  }
-
-  // 3. Création de l'utilisateur si la validation réussit
-  const nouvelUtilisateur = {
-    id: prochainId++,
-    name: name.trim(),
-    email: email.trim(),
-    role: role || 'user' // Rôle par défaut
-  };
-
-  users.push(nouvelUtilisateur);
-  res.status(201).json({ message: 'Utilisateur créé', user: nouvelUtilisateur });
-};
-// 4. Supprimer un utilisateur
-const deleteUser = (req, res) => {
-  const id = Number(req.params.id);
-  const userExiste = users.some(u => u.id === id);
-  if (!userExiste) {
-    return res.status(404).json({ error: `Impossible de supprimer : utilisateur ${id} introuvable` });
-  }
-  users = users.filter(u => u.id !== id);
-  res.status(200).json({ message: `Utilisateur ${id} supprimé avec succès` });
 };
 
-// Exportation des fonctions
+// Mettre à jour un utilisateur
+const updateUser = async (req, res) => {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+    res.status(200).json({ message: 'Utilisateur mis à jour avec succès', user });
+  } catch (err) {
+    if (err.name === 'CastError') {
+      return res.status(400).json({
+        message: 'Identifiant de ressource invalide (format ObjectId attendu)'
+      });
+    }
+    res.status(400).json({ message: err.message });
+  }
+};
+
+// Supprimer un utilisateur
+const deleteUser = async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+
+    const hasArticles = await Article.findOne({ author: userId });
+    if (hasArticles) {
+      return res.status(400).json({
+        message: 'Impossible de supprimer un utilisateur ayant des articles publies'
+      });
+    }
+
+    await User.findByIdAndDelete(userId);
+    res.status(200).json({ message: 'Utilisateur supprimé avec succès', id: userId });
+  } catch (err) {
+    if (err.name === 'CastError') {
+      return res.status(400).json({
+        message: 'Identifiant de ressource invalide (format ObjectId attendu)'
+      });
+    }
+    res.status(500).json({ message: err.message });
+  }
+};
+
 module.exports = {
   getAllUsers,
   getUserById,
   createUser,
+  updateUser,
   deleteUser
 };
