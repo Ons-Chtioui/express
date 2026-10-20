@@ -1,53 +1,19 @@
 const Article = require('../models/articleModel');
-const User = require('../models/userModel');
 
-// 1. Récupérer tous les articles avec les données complètes de l'auteur
+// 1. GET /api/articles (Récupérer tous les articles)
 const getAllArticles = async (req, res) => {
   try {
-    const articles = await Article.find().populate('author', 'name email');
+    const articles = await Article.find().populate('author', 'name email role');
     res.status(200).json(articles);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-// 2. Créer un nouvel article lié à un auteur
-const createArticle = async (req, res) => {
-  try {
-    const { title, content, authorId } = req.body;
-
-    if (!title || !content || !authorId) {
-      return res.status(400).json({
-        message: 'title, content et authorId sont obligatoires'
-      });
-    }
-
-    const author = await User.findById(authorId);
-    if (!author) {
-      return res.status(404).json({
-        message: 'Auteur non trouvé (identifiant authorId invalide)'
-      });
-    }
-
-    const newArticle = await Article.create({ title, content, author: authorId });
-    const populatedArticle = await newArticle.populate('author', 'name email');
-
-    res.status(201).json(populatedArticle);
-  } catch (err) {
-    // Gestion du CastError si authorId dans le body est mal formé
-    if (err.name === 'CastError') {
-      return res.status(400).json({
-        message: 'Identifiant de ressource invalide (format ObjectId attendu)'
-      });
-    }
-    res.status(500).json({ message: err.message });
-  }
-};
-
-// 3. Récupérer un article unique par son ID
+// 2. GET /api/articles/:id (Récupérer un article unique)
 const getArticleById = async (req, res) => {
   try {
-    const article = await Article.findById(req.params.id).populate('author', 'name email');
+    const article = await Article.findById(req.params.id).populate('author', 'name email role');
 
     if (!article) {
       return res.status(404).json({ message: 'Article non trouvé' });
@@ -55,65 +21,109 @@ const getArticleById = async (req, res) => {
 
     res.status(200).json(article);
   } catch (err) {
-    // Interception de CastError (ID invalide dans l'URL)
     if (err.name === 'CastError') {
-      return res.status(400).json({
-        message: 'Identifiant de ressource invalide (format ObjectId attendu)'
-      });
+      return res.status(400).json({ message: 'Identifiant invalide' });
     }
     res.status(500).json({ message: err.message });
   }
 };
 
-// 4. Mettre à jour un article (PUT /api/articles/:id)
-const updateArticle = async (req, res) => {
+// 3. POST /api/articles (Création protégée)
+const createArticle = async (req, res) => {
   try {
-    const article = await Article.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    );
-
-    if (!article) {
-      return res.status(404).json({ message: 'Article introuvable pour la mise à jour' });
+    const { title, content } = req.body;
+    if (!title || !content) {
+      return res.status(400).json({ message: 'Titre et contenu obligatoires' });
     }
 
-    const populated = await article.populate('author', 'name email');
+    // L'auteur est extrait directement du token JWT vérifié (req.user)
+    const newArticle = await Article.create({
+      title,
+      content,
+      author: req.user._id
+    });
+
+    const populated = await newArticle.populate('author', 'name email role');
+    res.status(201).json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// 4. PUT /api/articles/:id (Modification protégée : auteur ou admin)
+const updateArticle = async (req, res) => {
+  try {
+    const article = await Article.findById(req.params.id);
+    if (!article) {
+      return res.status(404).json({ message: 'Article non trouvé' });
+    }
+
+    // Vérification des droits de propriété
+    if (
+      article.author.toString() !== req.user._id.toString() &&
+      req.user.role !== 'admin'
+    ) {
+      return res.status(403).json({
+        message: "Action interdite : vous n'êtes pas l'auteur de cet article"
+      });
+    }
+
+    article.title = req.body.title || article.title;
+    article.content = req.body.content || article.content;
+
+    const updated = await article.save();
+    const populated = await updated.populate('author', 'name email role');
     res.status(200).json(populated);
   } catch (err) {
     if (err.name === 'CastError') {
-      return res.status(400).json({
-        message: 'Identifiant de ressource invalide (format ObjectId attendu)'
-      });
+      return res.status(400).json({ message: 'Identifiant invalide' });
     }
     res.status(500).json({ message: err.message });
   }
 };
 
-// 5. Supprimer un article (DELETE /api/articles/:id)
+// 5. DELETE /api/articles/:id (Suppression protégée : auteur ou admin)
 const deleteArticle = async (req, res) => {
   try {
-    const article = await Article.findByIdAndDelete(req.params.id);
-
+    const article = await Article.findById(req.params.id);
     if (!article) {
-      return res.status(404).json({ message: 'Article introuvable pour la suppression' });
+      return res.status(404).json({ message: 'Article non trouvé' });
     }
 
+    // Vérification des droits de propriété
+    if (
+      article.author.toString() !== req.user._id.toString() &&
+      req.user.role !== 'admin'
+    ) {
+      return res.status(403).json({
+        message: "Action interdite : vous n'êtes pas l'auteur de cet article"
+      });
+    }
+
+    await Article.findByIdAndDelete(req.params.id);
     res.status(200).json({ message: 'Article supprimé avec succès', id: req.params.id });
   } catch (err) {
     if (err.name === 'CastError') {
-      return res.status(400).json({
-        message: 'Identifiant de ressource invalide (format ObjectId attendu)'
-      });
+      return res.status(400).json({ message: 'Identifiant invalide' });
     }
     res.status(500).json({ message: err.message });
   }
 };
-
+// GET /api/articles/my-articles (Protégé)
+const getMyArticles = async (req, res) => {
+  try {
+    // Récupération des articles appartenant uniquement à l'utilisateur connecté
+    const articles = await Article.find({ author: req.user._id }).populate('author', 'name email role');
+    res.status(200).json(articles);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
 module.exports = {
   getAllArticles,
-  createArticle,
   getArticleById,
+  createArticle,
   updateArticle,
-  deleteArticle
+  deleteArticle,
+  getMyArticles
 };

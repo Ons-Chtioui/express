@@ -15,15 +15,27 @@ const userSchema = new mongoose.Schema(
       trim: true,
       match: [/^\S+@\S+\.\S+$/, 'Adresse email invalide']
     },
+    // Champ mot de passe ajouté tp4
+    password: {
+      type: String,
+      required: [true, 'Le mot de passe est obligatoire'],
+      minlength: [6, 'Le mot de passe doit contenir au moins 6 caractères']
+    },
+    role: {
+      type: String,
+      enum:{
+        values: ['user', 'admin'],
+        message:'{VALUE} n\'est pas un rôle autorisé'
+
+      }, 
+
+      default: 'user'
+    },
     age: {
       type: Number,
       min: [4, "L'âge minimum est de 4 ans"]
     },
-    role: {
-      type: String,
-      enum: ['user', 'admin'],
-      default: 'user'
-    },
+   
     // Nouveaux champs demandés dans la question 1
     bio: {
       type: String,
